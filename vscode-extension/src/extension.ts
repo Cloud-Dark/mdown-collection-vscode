@@ -135,6 +135,13 @@ export async function activate(context: vscode.ExtensionContext) {
           return;
         }
 
+        if (msg.type === "KANBAN_ATTACH_DOC_REFS_DROP") {
+          if (!Array.isArray(msg.paths) || msg.paths.length === 0) return;
+          kanbanService.appendCardDocRefs(msg.cardId, msg.paths);
+          postKanbanState(kanbanPanel!);
+          return;
+        }
+
         if (msg.type === "KANBAN_IMPLEMENT") {
           const board = kanbanService.getBoard();
           if (!board) {
@@ -491,6 +498,7 @@ function kanbanHtml(): string {
   .col h3 { margin:0; padding:10px; border-bottom:1px solid var(--vscode-panel-border); font-size:13px; }
   .cards { padding:8px; display:flex; flex-direction:column; gap:8px; }
   .card { border:1px solid var(--vscode-panel-border); border-radius:6px; padding:8px; background: var(--vscode-editorWidget-background); }
+  .card.drop-target { outline: 2px dashed var(--vscode-focusBorder); }
   .card h4 { margin:0 0 6px 0; font-size:13px; }
   .card p { margin:0 0 8px 0; font-size:12px; opacity:.9; }
   .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
@@ -567,11 +575,40 @@ function kanbanHtml(): string {
               vscode.postMessage({ type: 'KANBAN_SET_PLANNING_TYPE', cardId: card.id, planningType: select.value });
             }
           });
+          const attach = document.createElement('button');
+          attach.textContent = 'Attach Docs';
+          attach.addEventListener('click', () => vscode.postMessage({ type: 'KANBAN_ATTACH_DOC_REFS', cardId: card.id }));
           const move = document.createElement('button');
           move.textContent = 'Move → On Progress';
           move.addEventListener('click', () => vscode.postMessage({ type: 'KANBAN_MOVE_CARD', cardId: card.id, to: 'on_progress' }));
           row.appendChild(select);
+          row.appendChild(attach);
           row.appendChild(move);
+
+          wrap.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            wrap.classList.add('drop-target');
+          });
+          wrap.addEventListener('dragleave', () => {
+            wrap.classList.remove('drop-target');
+          });
+          wrap.addEventListener('drop', (event) => {
+            event.preventDefault();
+            wrap.classList.remove('drop-target');
+            const raw = event.dataTransfer && event.dataTransfer.getData('application/vnd.code.tree.docBridge');
+            if (!raw) return;
+            try {
+              const paths = JSON.parse(raw);
+              if (Array.isArray(paths) && paths.length) {
+                vscode.postMessage({ type: 'KANBAN_ATTACH_DOC_REFS_DROP', cardId: card.id, paths });
+              }
+            } catch {
+              const fallback = raw.split(',').map(x => x.trim()).filter(Boolean);
+              if (fallback.length) {
+                vscode.postMessage({ type: 'KANBAN_ATTACH_DOC_REFS_DROP', cardId: card.id, paths: fallback });
+              }
+            }
+          });
         }
 
         if (col === 'on_progress') {
@@ -589,6 +626,12 @@ function kanbanHtml(): string {
         }
 
         wrap.appendChild(row);
+        if (Array.isArray(card.docRefs) && card.docRefs.length) {
+          const refs = document.createElement('div');
+          refs.className = 'muted';
+          refs.textContent = 'Docs: ' + card.docRefs.join(', ');
+          wrap.appendChild(refs);
+        }
         if (card.error) {
           const err = document.createElement('div');
           err.className = 'error';

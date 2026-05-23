@@ -68,6 +68,17 @@ export class KanbanService {
     return board;
   }
 
+  appendCardDocRefs(cardId: string, docRefs: string[]): KanbanBoard {
+    const board = this.requireBoard();
+    const card = this.requireCard(board, cardId);
+    const current = Array.isArray(card.docRefs) ? card.docRefs : [];
+    card.docRefs = [...new Set([...current, ...docRefs])].filter(Boolean);
+    card.updatedAt = nowIso();
+    board.updatedAt = nowIso();
+    this.saveBoard(board);
+    return board;
+  }
+
   moveCard(cardId: string, to: KanbanColumn): KanbanBoard {
     const board = this.requireBoard();
     const card = this.requireCard(board, cardId);

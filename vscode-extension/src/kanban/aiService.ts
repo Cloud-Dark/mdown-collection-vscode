@@ -32,9 +32,13 @@ export class OpenAiKanbanService implements KanbanAiService {
   }
 
   async implementCards(input: { requirement: string; cards: KanbanCard[] }): Promise<{ proposals: FileEditProposal[] }> {
-    const cardText = input.cards.map((c) => `- [${c.id}] ${c.title}: ${c.description}`).join("\n");
+    const cardText = input.cards.map((c) => {
+      const refs = c.docRefs?.length ? ` | docs: ${c.docRefs.join(", ")}` : "";
+      return `- [${c.id}] ${c.title}: ${c.description}${refs}`;
+    }).join("\n");
+    const hasDocRefs = input.cards.some((c) => Array.isArray(c.docRefs) && c.docRefs.length > 0);
     const system = "You are a coding assistant. Return strict JSON only.";
-    const user = `Project requirement: ${input.requirement}\nTasks:\n${cardText}\nReturn JSON format: {\"proposals\":[{\"cardId\":string,\"filePath\":string,\"action\":\"create\"|\"replace\",\"content\":string,\"summary\":string}]}. Only relative file paths.`;
+    const user = `Project requirement: ${input.requirement}\nTasks:\n${cardText}\n${hasDocRefs ? "Gunakan docs yang direferensikan di tiap task sebagai acuan utama." : ""}\nReturn JSON format: {\"proposals\":[{\"cardId\":string,\"filePath\":string,\"action\":\"create\"|\"replace\",\"content\":string,\"summary\":string}]}. Only relative file paths.`;
     const json = await this.chatJson([ { role: "system", content: system }, { role: "user", content: user } ]);
     const proposals = Array.isArray(json?.proposals) ? json.proposals : [];
     if (!proposals.length) {

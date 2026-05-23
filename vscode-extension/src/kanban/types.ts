@@ -38,7 +38,8 @@ export type KanbanWebviewMessage =
   | { type: "KANBAN_MOVE_CARD"; cardId: string; to: KanbanColumn }
   | { type: "KANBAN_IMPLEMENT"; cardIds?: string[] }
   | { type: "KANBAN_NEW_FROM_WEBVIEW"; requirement: string }
-  | { type: "KANBAN_ATTACH_DOC_REFS"; cardId: string };
+  | { type: "KANBAN_ATTACH_DOC_REFS"; cardId: string }
+  | { type: "KANBAN_ATTACH_DOC_REFS_DROP"; cardId: string; paths: string[] };
 
 export type KanbanHostMessage =
   | { type: "KANBAN_STATE"; board: KanbanBoard | null }
