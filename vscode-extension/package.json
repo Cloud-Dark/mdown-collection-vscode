@@ -3,7 +3,7 @@
   "publisher": "cloud-dark",
   "displayName": "Doc Bridge",
   "description": "Browse & pull docs directly from public GitHub repo",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Other"],
   "activationEvents": ["onView:docBridge"],
@@ -34,8 +34,8 @@
         "icon": "$(refresh)"
       },
       {
-        "command": "docBridge.search",
-        "title": "Search",
+        "command": "docBridge.searchInline",
+        "title": "Search Files",
         "icon": "$(search)"
       },
       {
@@ -57,19 +57,9 @@
     "menus": {
       "view/title": [
         {
-          "command": "docBridge.search",
-          "when": "view == docBridge",
-          "group": "navigation@1"
-        },
-        {
-          "command": "docBridge.clearSearch",
-          "when": "view == docBridge",
-          "group": "navigation@2"
-        },
-        {
           "command": "docBridge.refresh",
           "when": "view == docBridge",
-          "group": "navigation@3"
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [

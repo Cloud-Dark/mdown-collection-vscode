@@ -1,30 +1,37 @@
 # Doc Bridge
 
-Browse and pull markdown docs directly from public GitHub repo inside VS Code.
+Doc Bridge adalah tools untuk import dokumentasi dari:
+
+- https://github.com/Cloud-Dark/mdown-collection
+
+langsung ke VS Code dengan cepat dan mudah.
 
 ## Features
 
-- Folder tree view of all `.md` files in your repo
-- Search by filename or path
-- One-click download to workspace
-- Markdown preview without saving
+- Browse docs dalam struktur folder (tree) seperti di GitHub
+- Search file langsung dari panel Doc Bridge
+- Klik file untuk preview markdown
+- Highlight & edit placeholder `{{VARIABLE}}` sebelum import
+- Import ke workspace saat siap
 - Drag & drop support
 
 ## Requirements
 
-Run the local bridge server before using the extension:
-
-```bash
-cd server
-node index.js
-```
+Tidak perlu backend lokal.
+Extension mengambil data langsung dari public GitHub API.
 
 ## Settings
 
 | Setting | Default | Description |
 |---|---|---|
-| `docBridge.serverUrl` | `http://localhost:3456` | Bridge server URL |
-| `docBridge.apiKey` | *(empty)* | API key if set on server |
-| `docBridge.docsFolder` | *(empty = root)* | Folder in repo to browse |
-| `docBridge.recursive` | `true` | Include subfolders |
-| `docBridge.saveFolder` | *(empty = workspace root)* | Local save destination |
+| `docBridge.docsFolder` | *(empty = root)* | Folder di repo yang mau di-browse |
+| `docBridge.recursive` | `true` | Include subfolder secara rekursif |
+| `docBridge.saveFolder` | *(empty = workspace root)* | Folder tujuan saat import ke workspace |
+
+## Quick Usage
+
+1. Buka panel **Doc Bridge** di Activity Bar
+2. Klik **Search files...** jika ingin filter file tertentu
+3. Klik file untuk buka preview
+4. (Opsional) edit `{{VARIABLE}}` di preview
+5. Klik **Import to Workspace** untuk menyimpan file ke project kamu

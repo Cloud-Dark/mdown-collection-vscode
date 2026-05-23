@@ -21,8 +21,8 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(treeView);
 
   function updateTitle() {
-    const q = provider.getFilter();
-    treeView.title = q ? `Doc Bridge  🔍 "${q}"` : "Doc Bridge";
+    treeView.title = "Doc Bridge";
+    treeView.description = provider.getFilter() ? `filtered: ${provider.getFilter()}` : undefined;
   }
 
   // ─── Health check ────────────────────────────────────────────────────────
@@ -47,9 +47,9 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // ─── Search ──────────────────────────────────────────────────────────────
+  // ─── Search Inline (klik item Search di panel) ───────────────────────────
   context.subscriptions.push(
-    vscode.commands.registerCommand("docBridge.search", async () => {
+    vscode.commands.registerCommand("docBridge.searchInline", async () => {
       const input = await vscode.window.showInputBox({
         prompt: "Cari file markdown...",
         placeHolder: "Nama file atau path — Enter kosong untuk reset",
