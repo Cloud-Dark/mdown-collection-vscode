@@ -39,7 +39,8 @@ export class KanbanService {
       id: createId(),
       title: card.title,
       description: card.description,
-      column: "planning",
+      column: "todo",
+      priority: "medium", // Default priority
       createdAt: ts,
       updatedAt: ts,
     }));
@@ -82,8 +83,8 @@ export class KanbanService {
   moveCard(cardId: string, to: KanbanColumn): KanbanBoard {
     const board = this.requireBoard();
     const card = this.requireCard(board, cardId);
-    if (to === "on_progress" && !card.planningType) {
-      throw new Error("Pilih planning type dulu sebelum pindah ke On Progress.");
+    if (to === "doing" && !card.planningType) {
+      throw new Error("Pilih planning type dulu sebelum pindah ke Doing.");
     }
     card.column = to;
     card.updatedAt = nowIso();
@@ -114,7 +115,7 @@ export class KanbanService {
 
   getInProgress(cardIds?: string[]): KanbanCard[] {
     const board = this.requireBoard();
-    const cards = board.cards.filter((item) => item.column === "on_progress");
+    const cards = board.cards.filter((item) => item.column === "doing");
     if (!cardIds?.length) return cards;
     const selected = new Set(cardIds);
     return cards.filter((card) => selected.has(card.id));

@@ -3,7 +3,7 @@
   "publisher": "cloud-dark",
   "displayName": "Doc Bridge",
   "description": "Browse & pull docs directly from public GitHub repo",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Other"],
   "activationEvents": ["onView:docBridge", "onCommand:docBridge.kanbanNew", "onCommand:docBridge.kanbanOpen", "onCommand:docBridge.kanbanImplementInProgress", "onCommand:docBridge.kanbanSetApiKey", "onCommand:docBridge.kanbanConfigureAi"],
@@ -36,7 +36,7 @@
       { "command": "docBridge.copyLink", "title": "Copy Link", "icon": "$(link)" },
       { "command": "docBridge.kanbanNew", "title": "Kanban: New", "icon": "$(add)" },
       { "command": "docBridge.kanbanOpen", "title": "Kanban: Open", "icon": "$(project)" },
-      { "command": "docBridge.kanbanImplementInProgress", "title": "Kanban: Implement In Progress", "icon": "$(run)" },
+      { "command": "docBridge.kanbanImplementInProgress", "title": "Kanban: Implement Doing", "icon": "$(run)" },
       { "command": "docBridge.kanbanSetApiKey", "title": "Kanban: Set API Key", "icon": "$(key)" },
       { "command": "docBridge.kanbanConfigureAi", "title": "Kanban: Configure AI", "icon": "$(settings-gear)" }
     ],

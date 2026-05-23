@@ -150,7 +150,7 @@ export async function activate(context: vscode.ExtensionContext) {
           }
           const targets = kanbanService.getInProgress(msg.cardIds);
           if (!targets.length) {
-            void kanbanPanel?.webview.postMessage({ type: "KANBAN_ERROR", message: "Tidak ada card On Progress yang dipilih." } satisfies KanbanHostMessage);
+            void kanbanPanel?.webview.postMessage({ type: "KANBAN_ERROR", message: "Tidak ada card Doing yang dipilih." } satisfies KanbanHostMessage);
             return;
           }
           void kanbanPanel?.webview.postMessage({ type: "KANBAN_BUSY", busy: true, message: "Generating edit proposals..." } satisfies KanbanHostMessage);
@@ -406,7 +406,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       const targets = kanbanService.getInProgress();
       if (!targets.length) {
-        vscode.window.showInformationMessage("Belum ada card di On Progress.");
+        vscode.window.showInformationMessage("Belum ada card di Doing.");
         return;
       }
       const panel = openKanbanPanel();
@@ -486,43 +486,378 @@ function kanbanHtml(): string {
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Kanban</title>
+<title>Agent Kanban</title>
 <style>
-  body { font-family: var(--vscode-font-family, sans-serif); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin: 0; }
-  .top { display:flex; gap:8px; align-items:center; padding:12px; border-bottom:1px solid var(--vscode-panel-border); }
-  input { flex:1; padding:8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border:1px solid var(--vscode-input-border); }
-  button, select { padding:6px 8px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border:none; border-radius:4px; cursor:pointer; }
-  .muted { opacity: .75; font-size: 12px; }
-  .board { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; padding:12px; }
-  .col { border:1px solid var(--vscode-panel-border); border-radius:6px; min-height:260px; }
-  .col h3 { margin:0; padding:10px; border-bottom:1px solid var(--vscode-panel-border); font-size:13px; }
-  .cards { padding:8px; display:flex; flex-direction:column; gap:8px; }
-  .card { border:1px solid var(--vscode-panel-border); border-radius:6px; padding:8px; background: var(--vscode-editorWidget-background); }
-  .card.drop-target { outline: 2px dashed var(--vscode-focusBorder); }
-  .card h4 { margin:0 0 6px 0; font-size:13px; }
-  .card p { margin:0 0 8px 0; font-size:12px; opacity:.9; }
-  .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
-  .error { color: var(--vscode-errorForeground); font-size: 12px; margin-top: 6px; }
-  .busy { padding: 0 12px 12px 12px; font-size: 12px; }
+  :root {
+    --bg-main: #0d1117;
+    --bg-sidebar: #010409;
+    --bg-card: #161b22;
+    --bg-lane: #0d1117;
+    --border-color: #30363d;
+    --text-primary: #c9d1d9;
+    --text-secondary: #8b949e;
+    --accent-blue: #238636; /* Using green-ish for buttons like in image, or blue */
+    --accent-primary: #1f6feb;
+    --priority-high: #da3633;
+    --priority-medium: #d29922;
+    --priority-low: #3fb950;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    color: var(--text-primary);
+    background: var(--bg-main);
+    margin: 0;
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 240px;
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    flex-shrink: 0;
+  }
+  .sidebar-header {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    letter-spacing: 0.5px;
+  }
+  .sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--text-primary);
+  }
+  .nav-item:hover { background: #21262d; }
+  .nav-item.active { background: var(--accent-primary); color: white; }
+  .nav-item .count { margin-left: auto; color: var(--text-secondary); font-size: 11px; }
+
+  .sidebar-stats {
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+  }
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    margin-bottom: 8px;
+    color: var(--text-secondary);
+  }
+
+  /* ── Main Content ── */
+  .main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  /* ── Top Bar ── */
+  .top-bar {
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-main);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--border-color);
+    background: #21262d;
+    color: var(--text-primary);
+    transition: 0.2s;
+  }
+  .btn:hover { background: #30363d; border-color: #8b949e; }
+  .btn-primary {
+    background: var(--accent-primary);
+    border-color: rgba(240,246,252,0.1);
+    color: white;
+  }
+  .btn-primary:hover { background: #388bfd; }
+
+  .search-box {
+    flex: 1;
+    max-width: 400px;
+    position: relative;
+  }
+  .search-box input {
+    width: 100%;
+    background: #0d1117;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 6px 12px;
+    color: var(--text-primary);
+    font-size: 13px;
+    outline: none;
+  }
+  .search-box input:focus { border-color: var(--accent-primary); box-shadow: 0 0 0 3px rgba(31,111,235,0.3); }
+
+  /* ── Board ── */
+  .board-container {
+    flex: 1;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 20px;
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+  }
+  .lane {
+    width: 320px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    max-height: 100%;
+    background: transparent;
+  }
+  .lane-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 4px;
+    margin-bottom: 12px;
+  }
+  .lane-icon { opacity: 0.6; }
+  .lane-title {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .lane-count {
+    background: #21262d;
+    color: var(--text-secondary);
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: auto;
+  }
+
+  .cards-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+    cursor: grab;
+    transition: transform 0.1s, box-shadow 0.1s;
+  }
+  .card:hover { border-color: #8b949e; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+  .card:active { cursor: grabbing; }
+  .card.drop-target { outline: 2px dashed var(--accent-primary); outline-offset: 4px; }
+
+  .card-priority {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-bottom: 8px;
+  }
+  .priority-high { background: rgba(218, 54, 51, 0.2); color: #ff7b72; }
+  .priority-medium { background: rgba(210, 153, 34, 0.2); color: #d29922; }
+  .priority-low { background: rgba(63, 185, 80, 0.2); color: #7ee787; }
+
+  .card-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0 0 8px 0;
+    line-height: 1.4;
+  }
+  .card-desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .card-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .card-assignee {
+    width: 24px;
+    height: 24px;
+    background: #30363d;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+  }
+  .card-date {
+    font-size: 11px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+  }
+  .card-btn {
+    padding: 4px 8px;
+    font-size: 11px;
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .card-btn:hover { color: var(--text-primary); border-color: #8b949e; }
+
+  .error { color: #ff7b72; font-size: 12px; margin-top: 8px; }
+  .busy-overlay {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #161b22;
+    border: 1px solid var(--border-color);
+    padding: 12px 20px;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 13px;
+    z-index: 1000;
+  }
+  .spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,0.1);
+    border-top-color: var(--accent-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: #484f58; }
 </style>
 </head>
 <body>
-  <div class="top">
-    <input id="req" placeholder="buat aplikasi todo list" />
-    <button id="newBtn">Kanban New</button>
-    <button id="implBtn">Implement On Progress</button>
+  <div class="sidebar">
+    <div class="sidebar-header">Agent Kanban: Board</div>
+    <div class="sidebar-nav">
+      <div class="nav-item active">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25ZM9.5 3h3.5v2h-3.5Zm0 4h3.5v2h-3.5Zm0 4h3.5v2h-3.5ZM3 3h4.5v2H3Zm0 4h4.5v2H3Zm0 4h4.5v2H3Z"/></svg>
+        Open Board
+      </div>
+    </div>
+
+    <div class="sidebar-stats">
+      <div class="stat-row"><span id="active-tasks-count">0 active tasks</span></div>
+      <div class="sidebar-header" style="margin-top:16px">Lanes</div>
+      <div class="stat-row"><span>TODO</span><span id="count-todo">0</span></div>
+      <div class="stat-row"><span>DOING</span><span id="count-doing">0</span></div>
+      <div class="stat-row"><span>DONE</span><span id="count-done">0</span></div>
+    </div>
   </div>
-  <div class="busy muted" id="busy"></div>
-  <div class="board">
-    <div class="col"><h3>Planning</h3><div class="cards" id="planning"></div></div>
-    <div class="col"><h3>On Progress</h3><div class="cards" id="on_progress"></div></div>
-    <div class="col"><h3>Done</h3><div class="cards" id="done"></div></div>
+
+  <div class="main-content">
+    <div class="top-bar">
+      <button class="btn btn-primary" id="newBtn">+ New Task</button>
+      <button class="btn" id="addLaneBtn">+ Add Lane</button>
+      <div class="search-box">
+        <input id="req" placeholder="Cari atau buat task baru..." />
+      </div>
+      <button class="btn" id="implBtn">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM4.5 5.5v5l5-2.5-5-2.5Z"/></svg>
+        Implement
+      </button>
+    </div>
+
+    <div class="board-container">
+      <div class="lane">
+        <div class="lane-header">
+          <span class="lane-icon">≡</span>
+          <span class="lane-title">TODO</span>
+          <span class="lane-count" id="badge-todo">0</span>
+        </div>
+        <div class="cards-container" id="todo"></div>
+      </div>
+
+      <div class="lane">
+        <div class="lane-header">
+          <span class="lane-icon">≡</span>
+          <span class="lane-title">DOING</span>
+          <span class="lane-count" id="badge-doing">0</span>
+        </div>
+        <div class="cards-container" id="doing"></div>
+      </div>
+
+      <div class="lane">
+        <div class="lane-header">
+          <span class="lane-icon">≡</span>
+          <span class="lane-title">DONE</span>
+          <span class="lane-count" id="badge-done">0</span>
+        </div>
+        <div class="cards-container" id="done"></div>
+      </div>
+    </div>
   </div>
+
+  <div class="busy-overlay" id="busy" style="display:none">
+    <div class="spinner"></div>
+    <span id="busy-msg">Processing...</span>
+  </div>
+
 <script>
   const vscode = acquireVsCodeApi();
   let board = null;
 
   const busyEl = document.getElementById('busy');
+  const busyMsg = document.getElementById('busy-msg');
   const reqEl = document.getElementById('req');
 
   document.getElementById('newBtn').addEventListener('click', () => {
@@ -540,115 +875,190 @@ function kanbanHtml(): string {
       return;
     }
     if (msg.type === 'KANBAN_BUSY') {
-      busyEl.textContent = msg.busy ? (msg.message || 'Processing...') : '';
+      busyEl.style.display = msg.busy ? 'flex' : 'none';
+      busyMsg.textContent = msg.message || 'Processing...';
       return;
     }
     if (msg.type === 'KANBAN_ERROR') {
-      busyEl.textContent = msg.message;
+      busyEl.style.display = 'flex';
+      busyMsg.innerHTML = '<span style="color:#ff7b72">Error: ' + msg.message + '</span>';
+      setTimeout(() => { busyEl.style.display = 'none'; }, 5000);
       return;
     }
   });
 
   function render() {
-    ['planning','on_progress','done'].forEach(col => {
+    if (!board) return;
+
+    const counts = { todo: 0, doing: 0, done: 0 };
+    board.cards.forEach(c => { if(counts[c.column] !== undefined) counts[c.column]++; });
+
+    // Update counts
+    ['todo','doing','done'].forEach(col => {
+      document.getElementById('count-' + col).textContent = counts[col];
+      document.getElementById('badge-' + col).textContent = counts[col];
+    });
+    document.getElementById('active-tasks-count').textContent = (counts.todo + counts.doing) + ' active tasks';
+
+    ['todo','doing','done'].forEach(col => {
       const root = document.getElementById(col);
       root.innerHTML = '';
-      const cards = board?.cards?.filter(c => c.column === col) || [];
+      const cards = board.cards.filter(c => c.column === col);
+
       cards.forEach(card => {
         const wrap = document.createElement('div');
         wrap.className = 'card';
-        const opts =
-          '<option value="">planning type</option>' +
-          '<option value="prd" ' + (card.planningType === 'prd' ? 'selected' : '') + '>PRD</option>' +
-          '<option value="tech_plan" ' + (card.planningType === 'tech_plan' ? 'selected' : '') + '>Tech Plan</option>' +
-          '<option value="task_breakdown" ' + (card.planningType === 'task_breakdown' ? 'selected' : '') + '>Task Breakdown</option>';
+        wrap.draggable = true;
 
-        wrap.innerHTML = '<h4>' + escapeHtml(card.title) + '</h4><p>' + escapeHtml(card.description) + '</p>';
-        const row = document.createElement('div');
-        row.className = 'row';
+        const priority = card.priority || 'medium';
+        const dateStr = card.dueDate || new Date(card.createdAt).toLocaleDateString();
+        const initial = card.assignee?.name?.charAt(0) || 'G';
 
-        if (col === 'planning') {
+        let html = '';
+        if (col !== 'done') {
+          html += '<div class="card-priority priority-' + priority + '">' + priority.charAt(0).toUpperCase() + priority.slice(1) + '</div>';
+        }
+        html += '<h4 class="card-title">' + escapeHtml(card.title) + '</h4>';
+        html += '<div class="card-desc">' + escapeHtml(card.description) + '</div>';
+
+        html += '<div class="card-footer">';
+        html += '  <div class="card-assignee">' + initial + '</div>';
+        html += '  <div class="card-date">';
+        html += '    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.75 0a.75.75 0 0 1 .75.75V2h5V.75a.75.75 0 0 1 1.5 0V2h1.25c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0 1 13.25 16H2.75A1.75 1.75 0 0 1 1 14.25V3.75C1 2.784 1.784 2 2.75 2H4V.75A.75.75 0 0 1 4.75 0ZM2.5 7.5v6.75c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V7.5Zm10.75-4H2.75a.25.25 0 0 0-.25.25V6h11V3.75a.25.25 0 0 0-.25-.25Z"/></svg>';
+        html += '    ' + dateStr;
+        html += '  </div>';
+        html += '</div>';
+
+        // Actions
+        html += '<div class="card-actions">';
+        if (col === 'todo') {
           const select = document.createElement('select');
-          select.innerHTML = opts;
+          select.className = 'card-btn';
+          select.innerHTML =
+            '<option value="">Type</option>' +
+            '<option value="prd" ' + (card.planningType === 'prd' ? 'selected' : '') + '>PRD</option>' +
+            '<option value="tech_plan" ' + (card.planningType === 'tech_plan' ? 'selected' : '') + '>Plan</option>' +
+            '<option value="task_breakdown" ' + (card.planningType === 'task_breakdown' ? 'selected' : '') + '>Task</option>';
           select.addEventListener('change', () => {
-            if (select.value) {
-              vscode.postMessage({ type: 'KANBAN_SET_PLANNING_TYPE', cardId: card.id, planningType: select.value });
-            }
+            if (select.value) vscode.postMessage({ type: 'KANBAN_SET_PLANNING_TYPE', cardId: card.id, planningType: select.value });
           });
-          const attach = document.createElement('button');
-          attach.textContent = 'Attach Docs';
-          attach.addEventListener('click', () => vscode.postMessage({ type: 'KANBAN_ATTACH_DOC_REFS', cardId: card.id }));
+          wrap.appendChild(select);
+
           const move = document.createElement('button');
-          move.textContent = 'Move → On Progress';
-          move.addEventListener('click', () => vscode.postMessage({ type: 'KANBAN_MOVE_CARD', cardId: card.id, to: 'on_progress' }));
-          row.appendChild(select);
-          row.appendChild(attach);
-          row.appendChild(move);
-
-          wrap.addEventListener('dragover', (event) => {
-            event.preventDefault();
-            wrap.classList.add('drop-target');
-          });
-          wrap.addEventListener('dragleave', () => {
-            wrap.classList.remove('drop-target');
-          });
-          wrap.addEventListener('drop', (event) => {
-            event.preventDefault();
-            wrap.classList.remove('drop-target');
-            const raw = event.dataTransfer && event.dataTransfer.getData('application/vnd.code.tree.docBridge');
-            if (!raw) return;
-            try {
-              const paths = JSON.parse(raw);
-              if (Array.isArray(paths) && paths.length) {
-                vscode.postMessage({ type: 'KANBAN_ATTACH_DOC_REFS_DROP', cardId: card.id, paths });
-              }
-            } catch {
-              const fallback = raw.split(',').map(x => x.trim()).filter(Boolean);
-              if (fallback.length) {
-                vscode.postMessage({ type: 'KANBAN_ATTACH_DOC_REFS_DROP', cardId: card.id, paths: fallback });
-              }
-            }
-          });
-        }
-
-        if (col === 'on_progress') {
+          move.className = 'card-btn';
+          move.textContent = 'Start';
+          move.addEventListener('click', () => vscode.postMessage({ type: 'KANBAN_MOVE_CARD', cardId: card.id, to: 'doing' }));
+          wrap.appendChild(move);
+        } else if (col === 'doing') {
           const moveDone = document.createElement('button');
-          moveDone.textContent = 'Move → Done';
+          moveDone.className = 'card-btn';
+          moveDone.textContent = 'Finish';
           moveDone.addEventListener('click', () => vscode.postMessage({ type: 'KANBAN_MOVE_CARD', cardId: card.id, to: 'done' }));
-          row.appendChild(moveDone);
+          wrap.appendChild(moveDone);
+        } else {
+          const summary = document.createElement('div');
+          summary.className = 'card-desc';
+          summary.style.marginTop = '8px';
+          summary.textContent = card.implementationSummary || 'Done';
+          wrap.appendChild(summary);
         }
+        html += '</div>';
 
-        if (col === 'done') {
-          const done = document.createElement('span');
-          done.className = 'muted';
-          done.textContent = card.implementationSummary || 'Completed';
-          row.appendChild(done);
-        }
+        const content = document.createElement('div');
+        content.innerHTML = html;
+        // Append elements that have listeners
+        const actions = content.querySelector('.card-actions');
+        wrap.innerHTML = content.innerHTML;
+        // Re-attach buttons because innerHTML breaks listeners
+        wrap.querySelectorAll('button, select').forEach(btn => {
+           // This is tricky with innerHTML, better use appendChild for everything or delegated listeners
+        });
 
-        wrap.appendChild(row);
-        if (Array.isArray(card.docRefs) && card.docRefs.length) {
-          const refs = document.createElement('div');
-          refs.className = 'muted';
-          refs.textContent = 'Docs: ' + card.docRefs.join(', ');
-          wrap.appendChild(refs);
-        }
-        if (card.error) {
-          const err = document.createElement('div');
-          err.className = 'error';
-          err.textContent = card.error;
-          wrap.appendChild(err);
-        }
+        // Simplified render logic for listeners
+        renderCard(wrap, card, col);
+
         root.appendChild(wrap);
       });
     });
   }
 
+  function renderCard(wrap, card, col) {
+    wrap.innerHTML = '';
+    const priority = card.priority || 'medium';
+    const dateStr = card.dueDate || new Date(card.createdAt).toLocaleDateString().split('T')[0];
+    const initial = card.assignee?.name?.charAt(0) || 'G';
+
+    if (col !== 'done') {
+      const prio = document.createElement('div');
+      prio.className = 'card-priority priority-' + priority;
+      prio.textContent = priority.charAt(0).toUpperCase() + priority.slice(1);
+      wrap.appendChild(prio);
+    }
+
+    const title = document.createElement('h4');
+    title.className = 'card-title';
+    title.textContent = card.title;
+    wrap.appendChild(title);
+
+    const desc = document.createElement('div');
+    desc.className = 'card-desc';
+    desc.textContent = card.description;
+    wrap.appendChild(desc);
+
+    const footer = document.createElement('div');
+    footer.className = 'card-footer';
+    footer.innerHTML = '<div class="card-assignee">' + initial + '</div>' +
+      '<div class="card-date">' +
+      '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.75 0a.75.75 0 0 1 .75.75V2h5V.75a.75.75 0 0 1 1.5 0V2h1.25c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0 1 13.25 16H2.75A1.75 1.75 0 0 1 1 14.25V3.75C1 2.784 1.784 2 2.75 2H4V.75A.75.75 0 0 1 4.75 0ZM2.5 7.5v6.75c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V7.5Zm10.75-4H2.75a.25.25 0 0 0-.25.25V6h11V3.75a.25.25 0 0 0-.25-.25Z"/></svg>' +
+      ' ' + dateStr + '</div>';
+    wrap.appendChild(footer);
+
+    const actions = document.createElement('div');
+    actions.className = 'card-actions';
+
+    if (col === 'todo') {
+      const select = document.createElement('select');
+      select.className = 'card-btn';
+      select.innerHTML =
+        '<option value="">Type</option>' +
+        '<option value="prd" ' + (card.planningType === 'prd' ? 'selected' : '') + '>PRD</option>' +
+        '<option value="tech_plan" ' + (card.planningType === 'tech_plan' ? 'selected' : '') + '>Plan</option>' +
+        '<option value="task_breakdown" ' + (card.planningType === 'task_breakdown' ? 'selected' : '') + '>Task</option>';
+      select.addEventListener('change', () => {
+        if (select.value) vscode.postMessage({ type: 'KANBAN_SET_PLANNING_TYPE', cardId: card.id, planningType: select.value });
+      });
+      actions.appendChild(select);
+
+      const move = document.createElement('button');
+      move.className = 'card-btn';
+      move.textContent = 'Start';
+      move.addEventListener('click', () => vscode.postMessage({ type: 'KANBAN_MOVE_CARD', cardId: card.id, to: 'doing' }));
+      actions.appendChild(move);
+    } else if (col === 'doing') {
+      const moveDone = document.createElement('button');
+      moveDone.className = 'card-btn';
+      moveDone.textContent = 'Finish';
+      moveDone.addEventListener('click', () => vscode.postMessage({ type: 'KANBAN_MOVE_CARD', cardId: card.id, to: 'done' }));
+      actions.appendChild(moveDone);
+    } else {
+      const summary = document.createElement('div');
+      summary.className = 'card-desc';
+      summary.style.marginTop = '0';
+      summary.textContent = card.implementationSummary || 'Done';
+      actions.appendChild(summary);
+    }
+    wrap.appendChild(actions);
+
+    if (card.error) {
+      const err = document.createElement('div');
+      err.className = 'error';
+      err.textContent = card.error;
+      wrap.appendChild(err);
+    }
+  }
+
   function escapeHtml(s) {
-    return String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   vscode.postMessage({ type: 'KANBAN_READY' });

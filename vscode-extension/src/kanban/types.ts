@@ -1,12 +1,20 @@
-export type KanbanColumn = "planning" | "on_progress" | "done";
+export type KanbanColumn = "todo" | "doing" | "done";
 
 export type PlanningType = "prd" | "tech_plan" | "task_breakdown";
+
+export type CardPriority = "low" | "medium" | "high" | "urgent";
 
 export interface KanbanCard {
   id: string;
   title: string;
   description: string;
   column: KanbanColumn;
+  priority?: CardPriority;
+  dueDate?: string;
+  assignee?: {
+    name: string;
+    avatar?: string;
+  };
   planningType?: PlanningType;
   docRefs?: string[];
   implementationSummary?: string;

@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
-import { KanbanCard, FileEditProposal } from "./types";
+import { KanbanCard, FileEditProposal, CardPriority } from "./types";
 
 export interface KanbanAiService {
-  generatePlan(input: { requirement: string }): Promise<{ cards: Array<{ title: string; description: string }> }>;
+  generatePlan(input: { requirement: string }): Promise<{ cards: Array<{ title: string; description: string; priority?: CardPriority }> }>;
   implementCards(input: { requirement: string; cards: KanbanCard[] }): Promise<{ proposals: FileEditProposal[] }>;
 }
 
