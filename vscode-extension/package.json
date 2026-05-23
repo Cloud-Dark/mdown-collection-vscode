@@ -1,0 +1,116 @@
+{
+  "name": "doc-bridge",
+  "publisher": "cloud-dark",
+  "displayName": "Doc Bridge",
+  "description": "Browse & pull docs directly from public GitHub repo",
+  "version": "0.2.0",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onView:docBridge"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "docBridgeContainer",
+          "title": "Doc Bridge",
+          "icon": "$(book)"
+        }
+      ]
+    },
+    "views": {
+      "docBridgeContainer": [
+        {
+          "id": "docBridge",
+          "name": "Files",
+          "icon": "$(markdown)"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "docBridge.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "docBridge.search",
+        "title": "Search",
+        "icon": "$(search)"
+      },
+      {
+        "command": "docBridge.clearSearch",
+        "title": "Clear Search",
+        "icon": "$(close)"
+      },
+      {
+        "command": "docBridge.copyToLocal",
+        "title": "Copy to Local",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "docBridge.openPreview",
+        "title": "Open Preview",
+        "icon": "$(preview)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "docBridge.search",
+          "when": "view == docBridge",
+          "group": "navigation@1"
+        },
+        {
+          "command": "docBridge.clearSearch",
+          "when": "view == docBridge",
+          "group": "navigation@2"
+        },
+        {
+          "command": "docBridge.refresh",
+          "when": "view == docBridge",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "docBridge.copyToLocal",
+          "when": "viewItem == docItem",
+          "group": "inline"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Doc Bridge",
+      "properties": {
+        "docBridge.docsFolder": {
+          "type": "string",
+          "default": "",
+          "description": "Folder di repo GitHub yang mau di-browse"
+        },
+        "docBridge.recursive": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include subfolder secara rekursif"
+        },
+        "docBridge.saveFolder": {
+          "type": "string",
+          "default": "",
+          "description": "Subfolder tujuan save di workspace (kosong = root)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.24.0",
+    "typescript": "^5.3.0"
+  }
+}
