@@ -1,23 +1,8 @@
 import * as vscode from "vscode";
 import { DocFile, fetchFileList } from "./bridgeClient";
 
-// ─── Tree Nodes ───────────────────────────────────────────────────────────────
-
-export class SearchItem extends vscode.TreeItem {
-  constructor(query: string) {
-    super(query ? `Search: ${query}` : "Search files...", vscode.TreeItemCollapsibleState.None);
-    this.contextValue = "docSearch";
-    this.iconPath = new vscode.ThemeIcon("search");
-    this.description = query ? "filtered" : "all files";
-    this.command = { command: "docBridge.searchInline", title: "Search Inline" };
-    this.tooltip = query
-      ? "Klik untuk ubah pencarian (Enter kosong untuk reset)"
-      : "Klik untuk cari file berdasarkan nama/path";
-  }
-}
-
 export class FolderItem extends vscode.TreeItem {
-  children: TreeNode[] = [];
+  children: (FolderItem | DocItem)[] = [];
 
   constructor(public readonly label: string, public readonly folderPath: string) {
     super(label, vscode.TreeItemCollapsibleState.Collapsed);
@@ -42,44 +27,37 @@ export class DocItem extends vscode.TreeItem {
   }
 }
 
-export type TreeNode = SearchItem | FolderItem | DocItem;
-
-// ─── Tree Data Provider ───────────────────────────────────────────────────────
-
 export class DocFileProvider
-  implements vscode.TreeDataProvider<TreeNode> {
+  implements vscode.TreeDataProvider<FolderItem | DocItem> {
 
   private _onDidChange = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChange.event;
 
   private _allFiles: DocFile[] = [];
-  private _rootTree: TreeNode[] = [];
+  private _rootTree: (FolderItem | DocItem)[] = [];
   private _filter = "";
   private _loading = false;
 
-  getTreeItem(item: TreeNode): vscode.TreeItem {
+  getTreeItem(item: FolderItem | DocItem): vscode.TreeItem {
     return item;
   }
 
-  getChildren(parent?: TreeNode): TreeNode[] {
-    if (parent instanceof DocItem || parent instanceof SearchItem) {
-      return [];
-    }
+  getChildren(parent?: FolderItem | DocItem): (FolderItem | DocItem)[] {
+    if (parent instanceof DocItem) return [];
 
     if (this._filter) {
       if (parent) return [];
       const q = this._filter.toLowerCase();
-      const filtered = this._allFiles
+      return this._allFiles
         .filter(f => f.name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q))
         .map(f => new DocItem(f));
-      return [new SearchItem(this._filter), ...filtered];
     }
 
     if (!parent) {
       if (this._allFiles.length === 0 && !this._loading) {
         this._loadFiles();
       }
-      return [new SearchItem(this._filter), ...this._rootTree];
+      return this._rootTree;
     }
 
     if (parent instanceof FolderItem) {
@@ -93,12 +71,6 @@ export class DocFileProvider
     this._allFiles = [];
     this._rootTree = [];
     this._filter = "";
-    this._onDidChange.fire();
-  }
-
-  reloadKeepFilter(): void {
-    this._allFiles = [];
-    this._rootTree = [];
     this._onDidChange.fire();
   }
 
@@ -126,24 +98,22 @@ export class DocFileProvider
   }
 }
 
-// ─── Drag & Drop ─────────────────────────────────────────────────────────────
-
 const MIME = "application/vnd.code.tree.docBridge";
 
 export class DocDragDropController
-  implements vscode.TreeDragAndDropController<TreeNode> {
+  implements vscode.TreeDragAndDropController<FolderItem | DocItem> {
 
   readonly dropMimeTypes = [MIME];
   readonly dragMimeTypes = [MIME];
 
-  handleDrag(items: readonly TreeNode[], dataTransfer: vscode.DataTransfer): void {
+  handleDrag(items: readonly (FolderItem | DocItem)[], dataTransfer: vscode.DataTransfer): void {
     const paths = items
       .filter((i): i is DocItem => i instanceof DocItem)
       .map(i => i.file.path);
     dataTransfer.set(MIME, new vscode.DataTransferItem(paths));
   }
 
-  async handleDrop(_target: TreeNode | undefined, dataTransfer: vscode.DataTransfer): Promise<void> {
+  async handleDrop(_target: FolderItem | DocItem | undefined, dataTransfer: vscode.DataTransfer): Promise<void> {
     const item = dataTransfer.get(MIME);
     if (!item) return;
     for (const filePath of item.value as string[]) {
@@ -152,10 +122,8 @@ export class DocDragDropController
   }
 }
 
-// ─── Tree Builder ─────────────────────────────────────────────────────────────
-
-function buildTree(files: DocFile[]): TreeNode[] {
-  const roots: TreeNode[] = [];
+function buildTree(files: DocFile[]): (FolderItem | DocItem)[] {
+  const roots: (FolderItem | DocItem)[] = [];
   const folderMap = new Map<string, FolderItem>();
 
   const sortedFiles = [...files].sort((a, b) => a.path.localeCompare(b.path));
@@ -168,7 +136,7 @@ function buildTree(files: DocFile[]): TreeNode[] {
       continue;
     }
 
-    let siblings: TreeNode[] = roots;
+    let siblings: (FolderItem | DocItem)[] = roots;
     let currentPath = "";
 
     for (let i = 0; i < parts.length - 1; i++) {
@@ -192,7 +160,7 @@ function buildTree(files: DocFile[]): TreeNode[] {
   return sortTree(roots);
 }
 
-function sortTree(items: TreeNode[]): TreeNode[] {
+function sortTree(items: (FolderItem | DocItem)[]): (FolderItem | DocItem)[] {
   return items.sort((a, b) => {
     const isAFolder = a instanceof FolderItem;
     const isBFolder = b instanceof FolderItem;
@@ -204,9 +172,7 @@ function sortTree(items: TreeNode[]): TreeNode[] {
     const labelB = typeof b.label === "string" ? b.label : (b.label?.label || "");
     return labelA.localeCompare(labelB);
   }).map(item => {
-    if (item instanceof FolderItem) {
-      item.children = sortTree(item.children);
-    }
+    if (item instanceof FolderItem) item.children = sortTree(item.children);
     return item;
   });
 }

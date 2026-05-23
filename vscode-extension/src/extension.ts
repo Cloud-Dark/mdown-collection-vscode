@@ -47,9 +47,9 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // ─── Search Inline (klik item Search di panel) ───────────────────────────
+  // ─── Search (ikon di atas panel) ─────────────────────────────────────────
   context.subscriptions.push(
-    vscode.commands.registerCommand("docBridge.searchInline", async () => {
+    vscode.commands.registerCommand("docBridge.search", async () => {
       const input = await vscode.window.showInputBox({
         prompt: "Cari file markdown...",
         placeHolder: "Nama file atau path — Enter kosong untuk reset",
@@ -60,6 +60,19 @@ export async function activate(context: vscode.ExtensionContext) {
       updateTitle();
     })
   );
+
+  // copy link GitHub file
+  context.subscriptions.push(
+    vscode.commands.registerCommand("docBridge.copyLink", async (item: DocItem) => {
+      const url = `https://github.com/Cloud-Dark/mdown-collection/blob/main/${item.file.path}`;
+      await vscode.env.clipboard.writeText(url);
+      vscode.window.showInformationMessage("🔗 Link copied");
+    })
+  );
+
+  updateTitle();
+  provider.refresh();
+  treeView.message = undefined;
 
   context.subscriptions.push(
     vscode.commands.registerCommand("docBridge.clearSearch", () => {
@@ -179,7 +192,7 @@ function errorHtml(msg: string): string {
 function previewHtml(name: string, filePath: string, size: number, content: string): string {
   const sizeStr   = size < 1024 ? `${size} B` : `${(size / 1024).toFixed(1)} KB`;
   const variables = extractVariables(content);
-  const rendered  = renderMarkdown(content, variables);
+  const rendered  = safeRenderMarkdown(content, variables);
   const varCss    = buildVarCss(variables);
   const varList   = JSON.stringify(variables);
   const rawJson   = JSON.stringify(content);
@@ -218,6 +231,39 @@ function previewHtml(name: string, filePath: string, size: number, content: stri
   }
   .btn-import:hover { opacity: .85; }
   .btn-import svg { width: 14px; height: 14px; fill: currentColor; }
+
+  .view-toggle {
+    display: inline-flex;
+    border: 1px solid var(--vscode-panel-border, #444);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-right: 8px;
+  }
+  .view-toggle button {
+    border: none;
+    background: transparent;
+    color: var(--vscode-foreground);
+    font-size: 12px;
+    padding: 5px 10px;
+    cursor: pointer;
+  }
+  .view-toggle button.active {
+    background: var(--vscode-button-secondaryBackground, #3a3d41);
+  }
+
+  .raw {
+    display: none;
+    margin: 16px 24px 24px;
+    padding: 14px;
+    border-radius: 6px;
+    background: var(--vscode-textCodeBlock-background,#2d2d2d);
+    overflow-x: auto;
+    white-space: pre-wrap;
+    line-height: 1.5;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  }
+  .raw.show { display: block; }
+  .md.hide { display: none; }
 
   /* ── markdown body ── */
   .md { padding: 24px 28px; max-width: 860px; line-height: 1.7; }
@@ -349,6 +395,10 @@ function previewHtml(name: string, filePath: string, size: number, content: stri
     <h2>${esc(name)}</h2>
     <span>${esc(filePath)} &nbsp;·&nbsp; ${sizeStr}</span>
   </div>
+  <div class="view-toggle" role="group" aria-label="Preview mode">
+    <button id="btnRendered" class="active" onclick="switchView('rendered')">Rendered</button>
+    <button id="btnRaw" onclick="switchView('raw')">Raw</button>
+  </div>
   <button class="btn-import" id="btnImport" onclick="importFile()">
     <svg viewBox="0 0 16 16"><path d="M7 1v8.586L4.707 7.293a1 1 0 0 0-1.414 1.414l4 4a1 1 0 0 0 1.414 0l4-4a1 1 0 0 0-1.414-1.414L9 9.586V1a1 1 0 0 0-2 0zm-5 13a1 1 0 0 0 0 2h12a1 1 0 0 0 0-2H2z"/></svg>
     Import to Workspace
@@ -364,7 +414,8 @@ ${variables.length > 0 ? `
   <button class="reset" onclick="resetVars()">Reset</button>
 </div>` : ''}
 
-<div class="md">${rendered}</div>
+<div class="md" id="renderedView">${rendered}</div>
+<pre class="raw" id="rawView">${esc(content)}</pre>
 
 <div class="popover" id="popover">
   <div class="pop-arrow"></div>
@@ -383,9 +434,28 @@ ${variables.length > 0 ? `
   const replacements = {};
   let activeVar = null;
 
-  const popover  = document.getElementById('popover');
-  const popName  = document.getElementById('popName');
-  const popInput = document.getElementById('popInput');
+  const popover      = document.getElementById('popover');
+  const popName      = document.getElementById('popName');
+  const popInput     = document.getElementById('popInput');
+  const renderedView = document.getElementById('renderedView');
+  const rawView      = document.getElementById('rawView');
+  const btnRendered  = document.getElementById('btnRendered');
+  const btnRaw       = document.getElementById('btnRaw');
+
+  function switchView(mode) {
+    if (mode === 'raw') {
+      renderedView.classList.add('hide');
+      rawView.classList.add('show');
+      btnRendered.classList.remove('active');
+      btnRaw.classList.add('active');
+      hidePopover();
+      return;
+    }
+    renderedView.classList.remove('hide');
+    rawView.classList.remove('show');
+    btnRendered.classList.add('active');
+    btnRaw.classList.remove('active');
+  }
 
   function showPopover(name, anchorEl) {
     activeVar = name;
@@ -534,6 +604,14 @@ function buildVarCss(variables: string[]): string {
 }
 
 // ─── Minimal markdown → HTML renderer ────────────────────────────────────────
+
+function safeRenderMarkdown(md: string, variables: string[] = []): string {
+  try {
+    return renderMarkdown(md, variables);
+  } catch {
+    return `<p><em>Rendered preview gagal. Silakan gunakan mode Raw.</em></p><pre><code>${esc(md)}</code></pre>`;
+  }
+}
 
 function renderMarkdown(md: string, variables: string[] = []): string {
   let html = esc(md);

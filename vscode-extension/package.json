@@ -3,7 +3,7 @@
   "publisher": "cloud-dark",
   "displayName": "Doc Bridge",
   "description": "Browse & pull docs directly from public GitHub repo",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Other"],
   "activationEvents": ["onView:docBridge"],
@@ -28,66 +28,31 @@
       ]
     },
     "commands": [
-      {
-        "command": "docBridge.refresh",
-        "title": "Refresh",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "docBridge.searchInline",
-        "title": "Search Files",
-        "icon": "$(search)"
-      },
-      {
-        "command": "docBridge.clearSearch",
-        "title": "Clear Search",
-        "icon": "$(close)"
-      },
-      {
-        "command": "docBridge.copyToLocal",
-        "title": "Copy to Local",
-        "icon": "$(cloud-download)"
-      },
-      {
-        "command": "docBridge.openPreview",
-        "title": "Open Preview",
-        "icon": "$(preview)"
-      }
+      { "command": "docBridge.refresh", "title": "Refresh", "icon": "$(refresh)" },
+      { "command": "docBridge.search", "title": "Search", "icon": "$(search)" },
+      { "command": "docBridge.clearSearch", "title": "Clear Search", "icon": "$(close)" },
+      { "command": "docBridge.copyToLocal", "title": "Download", "icon": "$(cloud-download)" },
+      { "command": "docBridge.openPreview", "title": "Preview", "icon": "$(preview)" },
+      { "command": "docBridge.copyLink", "title": "Copy Link", "icon": "$(link)" }
     ],
     "menus": {
       "view/title": [
-        {
-          "command": "docBridge.refresh",
-          "when": "view == docBridge",
-          "group": "navigation@1"
-        }
+        { "command": "docBridge.search", "when": "view == docBridge", "group": "navigation@1" },
+        { "command": "docBridge.clearSearch", "when": "view == docBridge", "group": "navigation@2" },
+        { "command": "docBridge.refresh", "when": "view == docBridge", "group": "navigation@3" }
       ],
       "view/item/context": [
-        {
-          "command": "docBridge.copyToLocal",
-          "when": "viewItem == docItem",
-          "group": "inline"
-        }
+        { "command": "docBridge.copyLink", "when": "viewItem == docItem", "group": "inline@1" },
+        { "command": "docBridge.copyToLocal", "when": "viewItem == docItem", "group": "inline@2" },
+        { "command": "docBridge.openPreview", "when": "viewItem == docItem", "group": "inline@3" }
       ]
     },
     "configuration": {
       "title": "Doc Bridge",
       "properties": {
-        "docBridge.docsFolder": {
-          "type": "string",
-          "default": "",
-          "description": "Folder di repo GitHub yang mau di-browse"
-        },
-        "docBridge.recursive": {
-          "type": "boolean",
-          "default": true,
-          "description": "Include subfolder secara rekursif"
-        },
-        "docBridge.saveFolder": {
-          "type": "string",
-          "default": "",
-          "description": "Subfolder tujuan save di workspace (kosong = root)"
-        }
+        "docBridge.docsFolder": { "type": "string", "default": "", "description": "Folder di repo GitHub yang mau di-browse" },
+        "docBridge.recursive": { "type": "boolean", "default": true, "description": "Include subfolder secara rekursif" },
+        "docBridge.saveFolder": { "type": "string", "default": "", "description": "Subfolder tujuan saat import ke workspace (kosong = root)" }
       }
     }
   },
