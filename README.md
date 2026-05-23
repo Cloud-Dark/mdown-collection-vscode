@@ -1,174 +1,82 @@
 # Doc Bridge
 
-Browse & pull markdown docs dari **private GitHub repo** ke VS Code — via Node.js bridge server.
+Doc Bridge membantu kamu browse dokumen dari repo publik mdown-collection, preview markdown, lalu import ke workspace VS Code.
 
-```
-GitHub Private Repo (docs/)
-        ↓  PAT Token (aman di server)
-Node.js Bridge Server  →  GET /files  →  JSON
-        ↓
-VS Code Extension (TreeView)
-        ↓  klik / drag
-Local Workspace
-```
+## Features
 
----
+### Docs Browser
+- Browse docs dalam struktur tree seperti GitHub
+- Search file langsung dari panel Doc Bridge
+- Preview markdown (Rendered/Raw)
+- Highlight & edit placeholder `{{VARIABLE}}` sebelum import
+- Import ke workspace saat siap
+- Drag & drop file dari tree
 
-## Struktur Project
+### Kanban + AI (v0.2.5)
+- Kanban board: **Todo / Doing / Done**
+- Planning type per card (`prd`, `tech_plan`, `task_breakdown`)
+- Attach referensi dokumen ke card:
+  - tombol **Attach Docs**
+  - drag dari Doc Bridge tree ke card Planning
+- Implement card dengan endpoint OpenAI-compatible
+- Approval dulu sebelum apply perubahan file ke workspace
 
-```
-doc-bridge/
-├── server/              ← Node.js Express API
-│   ├── index.js
-│   ├── .env.example
-│   └── package.json
-│
-└── vscode-extension/    ← VS Code Extension
-    ├── src/
-    │   ├── extension.ts
-    │   ├── fileProvider.ts
-    │   └── bridgeClient.ts
-    ├── package.json
-    └── tsconfig.json
-```
+## Requirements
 
----
+- Tidak perlu backend lokal untuk fitur Doc Bridge (langsung pakai GitHub API publik)
+- Untuk Kanban AI, butuh endpoint OpenAI-compatible + API key
 
-## Setup: Server
-
-```bash
-cd server
-cp .env.example .env
-# edit .env: isi GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO
-
-npm install
-npm start
-# → running di http://localhost:3456
-```
-
-### GitHub Personal Access Token
-
-1. Buka https://github.com/settings/tokens
-2. Generate new token (Fine-grained)
-3. Repository access → pilih repo yang dimau
-4. Permissions → **Contents: Read-only**
-5. Copy token → paste ke `.env` sebagai `GITHUB_TOKEN`
-
-### Test server
-
-```bash
-# list files
-curl http://localhost:3456/files?path=docs
-
-# download satu file
-curl "http://localhost:3456/file?path=docs/setup.md"
-
-# health check
-curl http://localhost:3456/health
-```
-
----
-
-## Setup: VS Code Extension
+## Setup (Extension)
 
 ```bash
 cd vscode-extension
 npm install
 npm run compile
-
-# Tekan F5 di VS Code → buka Extension Development Host
 ```
 
-### Settings (VS Code)
+Lalu jalankan Extension Development Host dari VS Code (`F5`) atau package ke `.vsix`.
 
-Buka Settings → cari "Doc Bridge":
+## Settings
 
-| Setting | Default | Keterangan |
+| Setting | Default | Description |
 |---|---|---|
-| `docBridge.serverUrl` | `http://localhost:3456` | URL bridge server |
-| `docBridge.apiKey` | _(kosong)_ | API key jika server di-protect |
-| `docBridge.docsFolder` | `docs` | Folder di repo GitHub |
-| `docBridge.recursive` | `false` | Include subfolder |
-| `docBridge.saveFolder` | _(kosong)_ | Subfolder tujuan save di workspace |
+| `docBridge.docsFolder` | *(empty = root)* | Folder di repo yang mau di-browse |
+| `docBridge.recursive` | `true` | Include subfolder secara rekursif |
+| `docBridge.saveFolder` | *(empty = workspace root)* | Folder tujuan saat import ke workspace |
+| `docBridge.kanban.openaiBaseUrl` | `http://127.0.0.1:50667/v1` | Base URL OpenAI-compatible untuk Kanban AI |
+| `docBridge.kanban.model` | `gpt-4.1-mini` | Model name untuk endpoint AI |
 
----
+## Commands
 
-## Cara Pakai
+- `Kanban: Configure AI` → set base URL, model, API key
+- `Kanban: Set API Key` → update API key saja
+- `Kanban: New`
+- `Kanban: Open`
+- `Kanban: Implement Doing`
 
-1. Jalankan bridge server (`npm start`)
-2. Buka VS Code → klik icon **Doc Bridge** di sidebar kiri
-3. List file `.md` dari GitHub repo muncul
-4. **Klik** file → otomatis download & buka di editor
-5. **Drag** file dari panel ke workspace explorer → save ke local
+## Quick Usage
 
----
+### Doc Bridge
+1. Buka panel **Doc Bridge** di Activity Bar
+2. Klik **Search** jika ingin filter file tertentu
+3. Klik file untuk preview
+4. (Opsional) edit `{{VARIABLE}}`
+5. Klik **Import to Workspace**
 
-## Deploy Server (Production)
+### Kanban AI
+1. Jalankan **Kanban: Configure AI**
+2. Buat board lewat **Kanban: New**
+3. Atur planning type dan attach docs ke card
+4. Pindahkan card ke **Doing**
+5. Jalankan **Kanban: Implement Doing**
+6. Approve/reject proposal edit file per item
+7. Card sukses pindah ke **Done**
 
-Kalau mau server jalan terus (bukan localhost), bisa deploy ke:
+## Version
 
-- **VPS sendiri** pakai PM2: `pm2 start index.js --name doc-bridge`
-- **Railway / Render** — free tier cukup
-- **Docker**:
+Current package: **0.2.5**
 
-```dockerfile
-FROM node:20-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --production
-COPY . .
-CMD ["node", "index.js"]
-```
+## Notes
 
-Setelah deploy, update `docBridge.serverUrl` di VS Code Settings ke URL production.
-
----
-
-## API Reference
-
-### `GET /files`
-
-| Query | Default | Keterangan |
-|---|---|---|
-| `path` | `docs` | Folder di repo |
-| `recursive` | `false` | Rekursif subfolder |
-
-Response:
-```json
-{
-  "success": true,
-  "repo": "owner/repo",
-  "branch": "main",
-  "path": "docs",
-  "count": 3,
-  "files": [
-    {
-      "name": "setup.md",
-      "path": "docs/setup.md",
-      "size": 1024,
-      "sha": "abc123",
-      "download_url": "..."
-    }
-  ]
-}
-```
-
-### `GET /file?path=docs/setup.md`
-
-Response:
-```json
-{
-  "success": true,
-  "name": "setup.md",
-  "path": "docs/setup.md",
-  "sha": "abc123",
-  "size": 1024,
-  "content": "# Setup\n\n..."
-}
-```
-
-### `GET /health`
-
-```json
-{ "status": "ok", "repo": "owner/repo", "branch": "main" }
-```
+File `.vsix` harus sesuai versi terbaru saat install.
+Jika masih tampil versi lama, install ulang file terbaru: `vscode-extension/doc-bridge-0.2.5.vsix`.
