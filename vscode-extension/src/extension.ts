@@ -2,16 +2,186 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import { DocFileProvider, DocDragDropController, DocItem } from "./fileProvider";
-import { fetchFileContent, checkHealth, getSaveFolder } from "./bridgeClient";
+import { fetchFileContent, checkHealth, getSaveFolder, fetchFileList } from "./bridgeClient";
+import { KanbanService } from "./kanban/kanbanService";
+import { OpenAiKanbanService } from "./kanban/aiService";
+import { FileEditProposal, KanbanHostMessage, KanbanWebviewMessage } from "./kanban/types";
 
 // track panel yang sedang terbuka agar tidak dobel
 const openPanels = new Map<string, vscode.WebviewPanel>();
+let kanbanPanel: vscode.WebviewPanel | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
   console.log("Doc Bridge activated");
 
   const provider = new DocFileProvider();
   const dnd      = new DocDragDropController();
+  const kanbanService = new KanbanService(context.workspaceState);
+  const aiService = new OpenAiKanbanService(context, () => {
+    const cfg = vscode.workspace.getConfiguration("docBridge");
+    return {
+      baseUrl: cfg.get<string>("kanban.openaiBaseUrl", "http://127.0.0.1:50667/v1"),
+      model: cfg.get<string>("kanban.model", "gpt-4.1-mini"),
+    };
+  });
+
+  const workspaceRoot = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+  const resolveSafePath = (relativePath: string): string => {
+    const root = workspaceRoot();
+    if (!root) throw new Error("Buka folder workspace dulu.");
+    const cleaned = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
+    if (!cleaned || cleaned.includes("..")) throw new Error(`Path tidak aman: ${relativePath}`);
+    const full = path.resolve(root, cleaned);
+    const rel = path.relative(root, full);
+    if (rel.startsWith("..") || path.isAbsolute(rel)) throw new Error(`Path di luar workspace: ${relativePath}`);
+    return full;
+  };
+
+  const applyApprovedProposal = async (proposal: FileEditProposal): Promise<{ ok: boolean; message: string }> => {
+    const fullPath = resolveSafePath(proposal.filePath);
+    const uri = vscode.Uri.file(fullPath);
+    const exists = fs.existsSync(fullPath);
+
+    if (proposal.action === "create" && exists) {
+      const pick = await vscode.window.showQuickPick(["Replace file existing", "Skip"], { placeHolder: `${proposal.filePath} sudah ada` });
+      if (pick !== "Replace file existing") return { ok: false, message: "Skipped by user" };
+    }
+
+    if (proposal.action === "replace" && !exists) {
+      const pick = await vscode.window.showQuickPick(["Create instead", "Skip"], { placeHolder: `${proposal.filePath} belum ada` });
+      if (pick !== "Create instead") return { ok: false, message: "Skipped by user" };
+    }
+
+    const wsEdit = new vscode.WorkspaceEdit();
+    if (exists) {
+      const current = fs.readFileSync(fullPath, "utf-8");
+      const end = new vscode.Position(current.split(/\r?\n/).length + 1, 0);
+      wsEdit.replace(uri, new vscode.Range(new vscode.Position(0, 0), end), proposal.content);
+    } else {
+      wsEdit.createFile(uri, { ignoreIfExists: false, overwrite: true });
+      wsEdit.insert(uri, new vscode.Position(0, 0), proposal.content);
+    }
+    const applied = await vscode.workspace.applyEdit(wsEdit);
+    if (!applied) return { ok: false, message: "WorkspaceEdit gagal di-apply" };
+    return { ok: true, message: `Applied ${proposal.filePath}` };
+  };
+
+  const postKanbanState = (panel: vscode.WebviewPanel) => {
+    const message: KanbanHostMessage = { type: "KANBAN_STATE", board: kanbanService.getBoard() };
+    void panel.webview.postMessage(message);
+  };
+
+  const openKanbanPanel = () => {
+    if (kanbanPanel) {
+      kanbanPanel.reveal(vscode.ViewColumn.One);
+      postKanbanState(kanbanPanel);
+      return kanbanPanel;
+    }
+
+    kanbanPanel = vscode.window.createWebviewPanel("docBridgeKanban", "Doc Bridge Kanban", vscode.ViewColumn.One, { enableScripts: true });
+    kanbanPanel.webview.html = kanbanHtml();
+    kanbanPanel.onDidDispose(() => {
+      kanbanPanel = undefined;
+    });
+
+    kanbanPanel.webview.onDidReceiveMessage(async (msg: KanbanWebviewMessage) => {
+      try {
+        if (msg.type === "KANBAN_READY") {
+          postKanbanState(kanbanPanel!);
+          return;
+        }
+
+        if (msg.type === "KANBAN_SET_PLANNING_TYPE") {
+          kanbanService.setPlanningType(msg.cardId, msg.planningType);
+          postKanbanState(kanbanPanel!);
+          return;
+        }
+
+        if (msg.type === "KANBAN_MOVE_CARD") {
+          kanbanService.moveCard(msg.cardId, msg.to);
+          postKanbanState(kanbanPanel!);
+          return;
+        }
+
+        if (msg.type === "KANBAN_NEW_FROM_WEBVIEW") {
+          const req = msg.requirement.trim();
+          if (!req) {
+            void kanbanPanel?.webview.postMessage({ type: "KANBAN_ERROR", message: "Requirement tidak boleh kosong." } satisfies KanbanHostMessage);
+            return;
+          }
+          kanbanService.createBoard(req);
+          void kanbanPanel?.webview.postMessage({ type: "KANBAN_BUSY", busy: true, message: "Generating planning..." } satisfies KanbanHostMessage);
+          const plan = await aiService.generatePlan({ requirement: req });
+          kanbanService.setPlanningCards(plan.cards);
+          void kanbanPanel?.webview.postMessage({ type: "KANBAN_BUSY", busy: false } satisfies KanbanHostMessage);
+          postKanbanState(kanbanPanel!);
+          return;
+        }
+
+        if (msg.type === "KANBAN_ATTACH_DOC_REFS") {
+          const files = await fetchFileList();
+          if (!files.length) {
+            void kanbanPanel?.webview.postMessage({ type: "KANBAN_ERROR", message: "Doc Bridge file list kosong." } satisfies KanbanHostMessage);
+            return;
+          }
+          const picks = await vscode.window.showQuickPick(
+            files.map((f) => ({ label: f.name, description: f.path })),
+            { canPickMany: true, placeHolder: "Pilih file Doc Bridge untuk context card" }
+          );
+          if (!picks?.length) return;
+          kanbanService.setCardDocRefs(msg.cardId, picks.map((p) => p.description || p.label));
+          postKanbanState(kanbanPanel!);
+          return;
+        }
+
+        if (msg.type === "KANBAN_IMPLEMENT") {
+          const board = kanbanService.getBoard();
+          if (!board) {
+            void kanbanPanel?.webview.postMessage({ type: "KANBAN_ERROR", message: "Board belum dibuat." } satisfies KanbanHostMessage);
+            return;
+          }
+          const targets = kanbanService.getInProgress(msg.cardIds);
+          if (!targets.length) {
+            void kanbanPanel?.webview.postMessage({ type: "KANBAN_ERROR", message: "Tidak ada card On Progress yang dipilih." } satisfies KanbanHostMessage);
+            return;
+          }
+          void kanbanPanel?.webview.postMessage({ type: "KANBAN_BUSY", busy: true, message: "Generating edit proposals..." } satisfies KanbanHostMessage);
+          const result = await aiService.implementCards({ requirement: board.requirement, cards: targets });
+          const updates: Array<{ cardId: string; summary: string; success: boolean; error?: string }> = [];
+
+          for (const proposal of result.proposals) {
+            const pick = await vscode.window.showQuickPick(["Approve", "Reject"], {
+              placeHolder: `[${proposal.cardId}] ${proposal.summary} → ${proposal.filePath}`,
+            });
+            if (pick !== "Approve") {
+              updates.push({ cardId: proposal.cardId, success: false, summary: "Rejected", error: "Perubahan ditolak user." });
+              continue;
+            }
+            try {
+              const applied = await applyApprovedProposal(proposal);
+              updates.push({ cardId: proposal.cardId, success: applied.ok, summary: applied.message, error: applied.ok ? undefined : applied.message });
+            } catch (error: unknown) {
+              const message = error instanceof Error ? error.message : String(error);
+              updates.push({ cardId: proposal.cardId, success: false, summary: "Failed", error: message });
+            }
+          }
+
+          kanbanService.completeCards(updates);
+          void kanbanPanel?.webview.postMessage({ type: "KANBAN_BUSY", busy: false } satisfies KanbanHostMessage);
+          postKanbanState(kanbanPanel!);
+          return;
+        }
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        void kanbanPanel?.webview.postMessage({ type: "KANBAN_BUSY", busy: false } satisfies KanbanHostMessage);
+        void kanbanPanel?.webview.postMessage({ type: "KANBAN_ERROR", message } satisfies KanbanHostMessage);
+      }
+    }, undefined, context.subscriptions);
+
+    postKanbanState(kanbanPanel);
+    return kanbanPanel;
+  };
 
   const treeView = vscode.window.createTreeView("docBridge", {
     treeDataProvider: provider,
@@ -146,6 +316,126 @@ export async function activate(context: vscode.ExtensionContext) {
       await saveToWorkspace(filePath, fileName, data.content);
     })
   );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("docBridge.kanbanSetApiKey", async () => {
+      const apiKey = await vscode.window.showInputBox({
+        prompt: "Masukkan API key untuk endpoint OpenAI-compatible",
+        password: true,
+        ignoreFocusOut: true,
+      });
+      if (!apiKey?.trim()) return;
+      await context.secrets.store("docBridge.kanban.apiKey", apiKey.trim());
+      vscode.window.showInformationMessage("Kanban API key tersimpan aman di SecretStorage.");
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("docBridge.kanbanConfigureAi", async () => {
+      const cfg = vscode.workspace.getConfiguration("docBridge");
+      const currentBaseUrl = cfg.get<string>("kanban.openaiBaseUrl", "http://127.0.0.1:50667/v1");
+      const currentModel = cfg.get<string>("kanban.model", "gpt-4.1-mini");
+
+      const baseUrl = await vscode.window.showInputBox({
+        prompt: "Set OpenAI-compatible Base URL",
+        value: currentBaseUrl,
+        ignoreFocusOut: true,
+      });
+      if (!baseUrl?.trim()) return;
+
+      const model = await vscode.window.showInputBox({
+        prompt: "Set model name",
+        value: currentModel,
+        ignoreFocusOut: true,
+      });
+      if (!model?.trim()) return;
+
+      const apiKey = await vscode.window.showInputBox({
+        prompt: "Set API key",
+        password: true,
+        ignoreFocusOut: true,
+      });
+      if (!apiKey?.trim()) return;
+
+      await cfg.update("kanban.openaiBaseUrl", baseUrl.trim(), vscode.ConfigurationTarget.Workspace);
+      await cfg.update("kanban.model", model.trim(), vscode.ConfigurationTarget.Workspace);
+      await context.secrets.store("docBridge.kanban.apiKey", apiKey.trim());
+      vscode.window.showInformationMessage("Kanban AI config tersimpan (base URL, model, API key).");
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("docBridge.kanbanOpen", () => {
+      openKanbanPanel();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("docBridge.kanbanNew", async () => {
+      const requirement = await vscode.window.showInputBox({
+        prompt: "Masukkan kebutuhan awal (contoh: buat aplikasi todo list)",
+        placeHolder: "buat aplikasi todo list",
+      });
+      if (!requirement?.trim()) return;
+      const panel = openKanbanPanel();
+      kanbanService.createBoard(requirement.trim());
+      void panel.webview.postMessage({ type: "KANBAN_BUSY", busy: true, message: "Generating planning..." } satisfies KanbanHostMessage);
+      try {
+        const plan = await aiService.generatePlan({ requirement: requirement.trim() });
+        kanbanService.setPlanningCards(plan.cards);
+      } finally {
+        void panel.webview.postMessage({ type: "KANBAN_BUSY", busy: false } satisfies KanbanHostMessage);
+      }
+      postKanbanState(panel);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("docBridge.kanbanImplementInProgress", async () => {
+      const board = kanbanService.getBoard();
+      if (!board) {
+        vscode.window.showErrorMessage("Kanban board belum dibuat.");
+        return;
+      }
+      const targets = kanbanService.getInProgress();
+      if (!targets.length) {
+        vscode.window.showInformationMessage("Belum ada card di On Progress.");
+        return;
+      }
+      const panel = openKanbanPanel();
+      void panel.webview.postMessage({ type: "KANBAN_BUSY", busy: true, message: "Generating edit proposals..." } satisfies KanbanHostMessage);
+      try {
+        const result = await aiService.implementCards({ requirement: board.requirement, cards: targets });
+        const updates: Array<{ cardId: string; summary: string; success: boolean; error?: string }> = [];
+        for (const proposal of result.proposals) {
+          const pick = await vscode.window.showQuickPick(["Approve", "Reject"], {
+            placeHolder: `[${proposal.cardId}] ${proposal.summary} → ${proposal.filePath}`,
+          });
+          if (pick !== "Approve") {
+            updates.push({ cardId: proposal.cardId, success: false, summary: "Rejected", error: "Perubahan ditolak user." });
+            continue;
+          }
+          try {
+            const applied = await applyApprovedProposal(proposal);
+            updates.push({ cardId: proposal.cardId, success: applied.ok, summary: applied.message, error: applied.ok ? undefined : applied.message });
+          } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            updates.push({ cardId: proposal.cardId, success: false, summary: "Failed", error: message });
+          }
+        }
+        kanbanService.completeCards(updates);
+      } finally {
+        void panel.webview.postMessage({ type: "KANBAN_BUSY", busy: false } satisfies KanbanHostMessage);
+      }
+      postKanbanState(panel);
+    })
+  );
+
+  context.subscriptions.push({ dispose: () => { kanbanPanel?.dispose(); } });
+
+  if (kanbanService.getBoard()) {
+    openKanbanPanel();
+  }
 }
 
 // ─── Helper: simpan ke workspace ─────────────────────────────────────────────
@@ -181,6 +471,147 @@ function loadingHtml(name: string): string {
   return `<!DOCTYPE html><html><body style="font-family:sans-serif;padding:2rem">
     <p>Loading <strong>${esc(name)}</strong>...</p>
   </body></html>`;
+}
+
+function kanbanHtml(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kanban</title>
+<style>
+  body { font-family: var(--vscode-font-family, sans-serif); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin: 0; }
+  .top { display:flex; gap:8px; align-items:center; padding:12px; border-bottom:1px solid var(--vscode-panel-border); }
+  input { flex:1; padding:8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border:1px solid var(--vscode-input-border); }
+  button, select { padding:6px 8px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border:none; border-radius:4px; cursor:pointer; }
+  .muted { opacity: .75; font-size: 12px; }
+  .board { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; padding:12px; }
+  .col { border:1px solid var(--vscode-panel-border); border-radius:6px; min-height:260px; }
+  .col h3 { margin:0; padding:10px; border-bottom:1px solid var(--vscode-panel-border); font-size:13px; }
+  .cards { padding:8px; display:flex; flex-direction:column; gap:8px; }
+  .card { border:1px solid var(--vscode-panel-border); border-radius:6px; padding:8px; background: var(--vscode-editorWidget-background); }
+  .card h4 { margin:0 0 6px 0; font-size:13px; }
+  .card p { margin:0 0 8px 0; font-size:12px; opacity:.9; }
+  .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .error { color: var(--vscode-errorForeground); font-size: 12px; margin-top: 6px; }
+  .busy { padding: 0 12px 12px 12px; font-size: 12px; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <input id="req" placeholder="buat aplikasi todo list" />
+    <button id="newBtn">Kanban New</button>
+    <button id="implBtn">Implement On Progress</button>
+  </div>
+  <div class="busy muted" id="busy"></div>
+  <div class="board">
+    <div class="col"><h3>Planning</h3><div class="cards" id="planning"></div></div>
+    <div class="col"><h3>On Progress</h3><div class="cards" id="on_progress"></div></div>
+    <div class="col"><h3>Done</h3><div class="cards" id="done"></div></div>
+  </div>
+<script>
+  const vscode = acquireVsCodeApi();
+  let board = null;
+
+  const busyEl = document.getElementById('busy');
+  const reqEl = document.getElementById('req');
+
+  document.getElementById('newBtn').addEventListener('click', () => {
+    vscode.postMessage({ type: 'KANBAN_NEW_FROM_WEBVIEW', requirement: reqEl.value || '' });
+  });
+  document.getElementById('implBtn').addEventListener('click', () => {
+    vscode.postMessage({ type: 'KANBAN_IMPLEMENT' });
+  });
+
+  window.addEventListener('message', (event) => {
+    const msg = event.data;
+    if (msg.type === 'KANBAN_STATE') {
+      board = msg.board;
+      render();
+      return;
+    }
+    if (msg.type === 'KANBAN_BUSY') {
+      busyEl.textContent = msg.busy ? (msg.message || 'Processing...') : '';
+      return;
+    }
+    if (msg.type === 'KANBAN_ERROR') {
+      busyEl.textContent = msg.message;
+      return;
+    }
+  });
+
+  function render() {
+    ['planning','on_progress','done'].forEach(col => {
+      const root = document.getElementById(col);
+      root.innerHTML = '';
+      const cards = board?.cards?.filter(c => c.column === col) || [];
+      cards.forEach(card => {
+        const wrap = document.createElement('div');
+        wrap.className = 'card';
+        const opts =
+          '<option value="">planning type</option>' +
+          '<option value="prd" ' + (card.planningType === 'prd' ? 'selected' : '') + '>PRD</option>' +
+          '<option value="tech_plan" ' + (card.planningType === 'tech_plan' ? 'selected' : '') + '>Tech Plan</option>' +
+          '<option value="task_breakdown" ' + (card.planningType === 'task_breakdown' ? 'selected' : '') + '>Task Breakdown</option>';
+
+        wrap.innerHTML = '<h4>' + escapeHtml(card.title) + '</h4><p>' + escapeHtml(card.description) + '</p>';
+        const row = document.createElement('div');
+        row.className = 'row';
+
+        if (col === 'planning') {
+          const select = document.createElement('select');
+          select.innerHTML = opts;
+          select.addEventListener('change', () => {
+            if (select.value) {
+              vscode.postMessage({ type: 'KANBAN_SET_PLANNING_TYPE', cardId: card.id, planningType: select.value });
+            }
+          });
+          const move = document.createElement('button');
+          move.textContent = 'Move → On Progress';
+          move.addEventListener('click', () => vscode.postMessage({ type: 'KANBAN_MOVE_CARD', cardId: card.id, to: 'on_progress' }));
+          row.appendChild(select);
+          row.appendChild(move);
+        }
+
+        if (col === 'on_progress') {
+          const moveDone = document.createElement('button');
+          moveDone.textContent = 'Move → Done';
+          moveDone.addEventListener('click', () => vscode.postMessage({ type: 'KANBAN_MOVE_CARD', cardId: card.id, to: 'done' }));
+          row.appendChild(moveDone);
+        }
+
+        if (col === 'done') {
+          const done = document.createElement('span');
+          done.className = 'muted';
+          done.textContent = card.implementationSummary || 'Completed';
+          row.appendChild(done);
+        }
+
+        wrap.appendChild(row);
+        if (card.error) {
+          const err = document.createElement('div');
+          err.className = 'error';
+          err.textContent = card.error;
+          wrap.appendChild(err);
+        }
+        root.appendChild(wrap);
+      });
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  vscode.postMessage({ type: 'KANBAN_READY' });
+</script>
+</body>
+</html>`;
 }
 
 function errorHtml(msg: string): string {

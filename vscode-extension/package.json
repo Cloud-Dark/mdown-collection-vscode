@@ -3,10 +3,10 @@
   "publisher": "cloud-dark",
   "displayName": "Doc Bridge",
   "description": "Browse & pull docs directly from public GitHub repo",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Other"],
-  "activationEvents": ["onView:docBridge"],
+  "activationEvents": ["onView:docBridge", "onCommand:docBridge.kanbanNew", "onCommand:docBridge.kanbanOpen", "onCommand:docBridge.kanbanImplementInProgress", "onCommand:docBridge.kanbanSetApiKey", "onCommand:docBridge.kanbanConfigureAi"],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -33,7 +33,12 @@
       { "command": "docBridge.clearSearch", "title": "Clear Search", "icon": "$(close)" },
       { "command": "docBridge.copyToLocal", "title": "Download", "icon": "$(cloud-download)" },
       { "command": "docBridge.openPreview", "title": "Preview", "icon": "$(preview)" },
-      { "command": "docBridge.copyLink", "title": "Copy Link", "icon": "$(link)" }
+      { "command": "docBridge.copyLink", "title": "Copy Link", "icon": "$(link)" },
+      { "command": "docBridge.kanbanNew", "title": "Kanban: New", "icon": "$(add)" },
+      { "command": "docBridge.kanbanOpen", "title": "Kanban: Open", "icon": "$(project)" },
+      { "command": "docBridge.kanbanImplementInProgress", "title": "Kanban: Implement In Progress", "icon": "$(run)" },
+      { "command": "docBridge.kanbanSetApiKey", "title": "Kanban: Set API Key", "icon": "$(key)" },
+      { "command": "docBridge.kanbanConfigureAi", "title": "Kanban: Configure AI", "icon": "$(settings-gear)" }
     ],
     "menus": {
       "view/title": [
@@ -52,7 +57,9 @@
       "properties": {
         "docBridge.docsFolder": { "type": "string", "default": "", "description": "Folder di repo GitHub yang mau di-browse" },
         "docBridge.recursive": { "type": "boolean", "default": true, "description": "Include subfolder secara rekursif" },
-        "docBridge.saveFolder": { "type": "string", "default": "", "description": "Subfolder tujuan saat import ke workspace (kosong = root)" }
+        "docBridge.saveFolder": { "type": "string", "default": "", "description": "Subfolder tujuan saat import ke workspace (kosong = root)" },
+        "docBridge.kanban.openaiBaseUrl": { "type": "string", "default": "http://127.0.0.1:50667/v1", "description": "OpenAI-compatible base URL untuk Kanban AI" },
+        "docBridge.kanban.model": { "type": "string", "default": "gpt-4.1-mini", "description": "Model name untuk endpoint OpenAI-compatible" }
       }
     }
   },
